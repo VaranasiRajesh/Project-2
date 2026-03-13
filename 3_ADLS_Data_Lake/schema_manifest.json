@@ -1,0 +1,79 @@
+{
+    "bronze_layer": {
+        "description": "Raw ingested data — immutable, as-received from source systems",
+        "format": "CSV",
+        "compression": "None",
+        "schema_enforcement": false,
+        "retention_days": 90,
+        "files": {
+            "loans_raw.csv": {
+                "source": "World Bank SODA API (zucq-nqt1)",
+                "ingestion_method": "ADF Copy Activity / Python script",
+                "estimated_rows": "500,000 - 1,000,000",
+                "columns": [
+                    {"name": "End of Period", "type": "string", "description": "Reporting period end date"},
+                    {"name": "Loan Number", "type": "string", "description": "Unique IBRD loan identifier"},
+                    {"name": "Region", "type": "string", "description": "Geographic region"},
+                    {"name": "Country Code", "type": "string", "description": "ISO country code"},
+                    {"name": "Country", "type": "string", "description": "Full country name"},
+                    {"name": "Borrower", "type": "string", "description": "Borrowing entity"},
+                    {"name": "Guarantor Country Code", "type": "string", "description": "Guarantor ISO code"},
+                    {"name": "Guarantor", "type": "string", "description": "Guarantor entity"},
+                    {"name": "Loan Type", "type": "string", "description": "IBRD loan classification"},
+                    {"name": "Loan Status", "type": "string", "description": "Current status"},
+                    {"name": "Interest Rate", "type": "string/numeric", "description": "Annual interest rate %"},
+                    {"name": "Service Charge Rate", "type": "string/numeric", "description": "Service charge %"},
+                    {"name": "Currency of Commitment", "type": "string", "description": "Commitment currency"},
+                    {"name": "Project ID", "type": "string", "description": "World Bank project ID"},
+                    {"name": "Project Name", "type": "string", "description": "Human-readable project name"},
+                    {"name": "Original Principal Amount", "type": "string/numeric", "description": "Original loan USD"},
+                    {"name": "Cancelled Amount", "type": "string/numeric", "description": "Cancelled USD"},
+                    {"name": "Undisbursed Amount", "type": "string/numeric", "description": "Undisbursed USD"},
+                    {"name": "Disbursed Amount", "type": "string/numeric", "description": "Disbursed USD"},
+                    {"name": "Repaid to IBRD", "type": "string/numeric", "description": "Repaid to IBRD USD"},
+                    {"name": "Due to IBRD", "type": "string/numeric", "description": "Outstanding due USD"},
+                    {"name": "Borrower's Obligation", "type": "string/numeric", "description": "Borrower obligation USD"},
+                    {"name": "Sold 3rd Party", "type": "string/numeric", "description": "Sold to 3rd party USD"},
+                    {"name": "Repaid 3rd Party", "type": "string/numeric", "description": "Repaid 3rd party USD"},
+                    {"name": "Due 3rd Party", "type": "string/numeric", "description": "Due 3rd party USD"},
+                    {"name": "Loans Held", "type": "string/numeric", "description": "Loans held USD"},
+                    {"name": "First Repayment Date", "type": "string", "description": "First repayment date"},
+                    {"name": "Last Repayment Date", "type": "string", "description": "Last repayment date"},
+                    {"name": "Agreement Signing Date", "type": "string", "description": "Signing date"},
+                    {"name": "Board Approval Date", "type": "string", "description": "Board approval date"},
+                    {"name": "Effective Date (Most Recent)", "type": "string", "description": "Effective date"},
+                    {"name": "Closed Date (Most Recent)", "type": "string", "description": "Closure date"},
+                    {"name": "Last Disbursement Date", "type": "string", "description": "Last disbursement date"}
+                ]
+            }
+        }
+    },
+    "silver_layer": {
+        "description": "Cleansed and standardized data — snake_case columns, typed, deduplicated",
+        "format": "Parquet",
+        "compression": "Snappy",
+        "partitioning": "country_code",
+        "schema_enforcement": true,
+        "transformations_applied": [
+            "Column names standardized to snake_case",
+            "Numeric columns cast to DoubleType",
+            "Date columns parsed to DateType (multi-format)",
+            "Nulls filled: categorical='Unknown', numeric=0.0",
+            "Exact + business-key deduplication (latest per loan_number)"
+        ]
+    },
+    "gold_layer": {
+        "description": "Analytics-ready Star Schema — dimension and fact tables",
+        "format": "Parquet",
+        "compression": "Snappy",
+        "schema_type": "Star Schema",
+        "tables": {
+            "fact_loans": "Central fact with measures and FK references",
+            "dim_country": "Country attributes (code, name, region, guarantor)",
+            "dim_project": "World Bank project identifiers and names",
+            "dim_loan_type": "Loan classification, status, currency",
+            "dim_borrower": "Borrowing entities and their countries"
+        },
+        "consumers": ["Snowpipe (auto-ingest)", "PowerBI (DirectQuery)", "Analysts (ad-hoc)"]
+    }
+}

@@ -1,0 +1,210 @@
+{
+    "dashboard_name": "IBRD Loan Analytics Dashboard",
+    "version": "1.0.0",
+    "author": "Data Engineering Team",
+    "created": "2026-03-13",
+    "data_source": {
+        "type": "Snowflake",
+        "connection": {
+            "server": "<YOUR_SNOWFLAKE_ACCOUNT>.snowflakecomputing.com",
+            "database": "IBRD_LOAN_ANALYTICS",
+            "schema": "GOLD",
+            "warehouse": "WH_IBRD_ETL",
+            "authentication": "Azure AD SSO",
+            "role": "IBRD_ANALYST"
+        },
+        "tables": [
+            "fact_loans",
+            "dim_country",
+            "dim_project",
+            "dim_loan_type",
+            "dim_borrower"
+        ],
+        "refresh_schedule": "Daily at 06:00 UTC (after pipeline completion)"
+    },
+    "pages": [
+        {
+            "page_number": 1,
+            "title": "Executive Summary",
+            "description": "High-level KPIs and portfolio overview for senior stakeholders",
+            "visuals": [
+                {
+                    "type": "card",
+                    "title": "Total Loan Amount",
+                    "measure": "Total Loan Amount",
+                    "position": "top-left"
+                },
+                {
+                    "type": "card",
+                    "title": "Total Cancelled",
+                    "measure": "Total Cancelled Amount",
+                    "position": "top-center"
+                },
+                {
+                    "type": "card",
+                    "title": "Cancellation Rate",
+                    "measure": "Cancellation Rate",
+                    "position": "top-right",
+                    "conditional_format": "red if > 15%"
+                },
+                {
+                    "type": "card",
+                    "title": "Active Loans",
+                    "measure": "Active Loan Count",
+                    "position": "top-far-right"
+                },
+                {
+                    "type": "filled_map",
+                    "title": "Global Loan Distribution",
+                    "location": "dim_country[country]",
+                    "color_by": "Total Loan Amount",
+                    "tooltip": ["Cancellation Rate", "Active Loan Count"],
+                    "position": "center"
+                },
+                {
+                    "type": "line_chart",
+                    "title": "Yearly Lending Trend",
+                    "x_axis": "fact_loans[board_approval_date] (Year)",
+                    "y_axis": ["Total Loan Amount", "Total Cancelled Amount"],
+                    "position": "bottom"
+                }
+            ]
+        },
+        {
+            "page_number": 2,
+            "title": "Cancellation Deep Dive",
+            "description": "Detailed cancellation pattern analysis for risk officers",
+            "visuals": [
+                {
+                    "type": "treemap",
+                    "title": "Cancellations by Region",
+                    "group": "dim_country[region]",
+                    "values": "SUM(fact_loans[cancelled_amount])",
+                    "position": "top-left"
+                },
+                {
+                    "type": "bar_chart",
+                    "title": "Top 10 Countries by Cancellation",
+                    "x_axis": "dim_country[country]",
+                    "y_axis": "SUM(fact_loans[cancelled_amount])",
+                    "sort": "descending",
+                    "top_n": 10,
+                    "position": "top-right"
+                },
+                {
+                    "type": "scatter_plot",
+                    "title": "Cancellation vs. Interest Rate",
+                    "x_axis": "AVERAGE(fact_loans[interest_rate])",
+                    "y_axis": "SUM(fact_loans[cancelled_amount])",
+                    "size": "Active Loan Count",
+                    "legend": "dim_country[region]",
+                    "position": "bottom-left"
+                },
+                {
+                    "type": "matrix",
+                    "title": "Cancellation Rate by Region & Loan Type",
+                    "rows": "dim_country[region]",
+                    "columns": "dim_loan_type[loan_type]",
+                    "values": "Regional Cancellation Rate",
+                    "conditional_format": "gradient red",
+                    "position": "bottom-right"
+                }
+            ]
+        },
+        {
+            "page_number": 3,
+            "title": "Loan Lifecycle Analysis",
+            "description": "Processing times, disbursement efficiency, and repayment patterns",
+            "visuals": [
+                {
+                    "type": "gauge",
+                    "title": "Disbursement Efficiency",
+                    "measure": "Disbursement Efficiency",
+                    "target": "90%",
+                    "position": "top-left"
+                },
+                {
+                    "type": "card",
+                    "title": "Avg Processing Days",
+                    "measure": "Avg Processing Days",
+                    "position": "top-center"
+                },
+                {
+                    "type": "card",
+                    "title": "Avg Repayment Years",
+                    "measure": "Avg Repayment Years",
+                    "position": "top-right"
+                },
+                {
+                    "type": "funnel",
+                    "title": "Loan Amount Pipeline",
+                    "stages": [
+                        "Total Loan Amount",
+                        "Total Disbursed Amount",
+                        "Total Repaid to IBRD",
+                        "Total Due to IBRD"
+                    ],
+                    "position": "center"
+                },
+                {
+                    "type": "column_chart",
+                    "title": "Avg Processing Days by Region",
+                    "x_axis": "dim_country[region]",
+                    "y_axis": "Avg Processing Days",
+                    "position": "bottom"
+                }
+            ]
+        },
+        {
+            "page_number": 4,
+            "title": "Borrower & Country Insights",
+            "description": "Top borrowers, country-level analysis, and geographic distribution",
+            "visuals": [
+                {
+                    "type": "table",
+                    "title": "Top 20 Borrowers",
+                    "columns": [
+                        "dim_borrower[borrower]",
+                        "dim_country[country]",
+                        "Total Loan Amount",
+                        "Total Cancelled Amount",
+                        "Cancellation Rate",
+                        "Active Loan Count"
+                    ],
+                    "sort": "Total Loan Amount DESC",
+                    "top_n": 20,
+                    "position": "left"
+                },
+                {
+                    "type": "donut_chart",
+                    "title": "Loans by Region",
+                    "legend": "dim_country[region]",
+                    "values": "Total Loan Amount",
+                    "position": "top-right"
+                },
+                {
+                    "type": "stacked_bar",
+                    "title": "Portfolio Composition by Country (Top 10)",
+                    "x_axis": "dim_country[country]",
+                    "y_axis": ["Total Disbursed Amount", "Total Cancelled Amount", "Total Due to IBRD"],
+                    "position": "bottom-right"
+                }
+            ]
+        }
+    ],
+    "slicers": [
+        {"field": "dim_country[region]", "type": "dropdown", "multi_select": true},
+        {"field": "dim_country[country]", "type": "dropdown", "multi_select": true},
+        {"field": "dim_loan_type[loan_status]", "type": "dropdown", "multi_select": true},
+        {"field": "dim_loan_type[loan_type]", "type": "button", "multi_select": false},
+        {"field": "fact_loans[board_approval_date]", "type": "date_range_slider"}
+    ],
+    "theme": {
+        "name": "IBRD Corporate",
+        "primary_color": "#002244",
+        "secondary_color": "#0078D4",
+        "accent_color": "#FF6B35",
+        "background": "#F5F5F5",
+        "font_family": "Segoe UI"
+    }
+}

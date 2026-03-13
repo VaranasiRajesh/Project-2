@@ -1,0 +1,332 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "metadata": {
+        "description": "ARM Template — Azure Data Factory pipeline to ingest IBRD loan data from the World Bank API (HTTP) into ADLS Gen2 Bronze layer.",
+        "author": "Data Engineering Team",
+        "created": "2026-03-13"
+    },
+    "parameters": {
+        "factoryName": {
+            "type": "string",
+            "defaultValue": "adf-ibrd-loan-pipeline",
+            "metadata": {
+                "description": "Name of the Azure Data Factory instance."
+            }
+        },
+        "adlsAccountName": {
+            "type": "string",
+            "metadata": {
+                "description": "Name of the ADLS Gen2 storage account."
+            }
+        },
+        "adlsFileSystem": {
+            "type": "string",
+            "defaultValue": "ibrd-datalake",
+            "metadata": {
+                "description": "ADLS Gen2 filesystem (container) name."
+            }
+        },
+        "adlsAccountKey": {
+            "type": "securestring",
+            "metadata": {
+                "description": "Access key for the ADLS Gen2 storage account. Store in Key Vault for production."
+            }
+        },
+        "worldBankApiBaseUrl": {
+            "type": "string",
+            "defaultValue": "https://finances.worldbank.org",
+            "metadata": {
+                "description": "Base URL for the World Bank Finances API."
+            }
+        }
+    },
+    "variables": {
+        "httpLinkedServiceName": "ls_http_worldbank_api",
+        "adlsLinkedServiceName": "ls_adls_gen2_datalake",
+        "sourceDatasetName": "ds_http_ibrd_loans_csv",
+        "sinkDatasetName": "ds_adls_bronze_ibrd_loans",
+        "pipelineName": "pl_ingest_ibrd_api_to_adls_bronze",
+        "bronzeDirectory": "3_ADLS_Data_Lake/bronze_layer"
+    },
+    "resources": [
+        {
+            "comments": "============================================================",
+            "comments2": "LINKED SERVICE 1: HTTP — World Bank Open Data API",
+            "comments3": "============================================================",
+            "type": "Microsoft.DataFactory/factories/linkedservices",
+            "apiVersion": "2018-06-01",
+            "name": "[concat(parameters('factoryName'), '/', variables('httpLinkedServiceName'))]",
+            "properties": {
+                "description": "HTTP linked service pointing to the World Bank Finances API for IBRD Statement of Loans data.",
+                "type": "HttpServer",
+                "typeProperties": {
+                    "url": "[parameters('worldBankApiBaseUrl')]",
+                    "enableServerCertificateValidation": true,
+                    "authenticationType": "Anonymous"
+                },
+                "annotations": [
+                    "source",
+                    "world-bank",
+                    "ibrd"
+                ]
+            }
+        },
+        {
+            "comments": "============================================================",
+            "comments2": "LINKED SERVICE 2: ADLS Gen2 — Data Lake Bronze Layer",
+            "comments3": "============================================================",
+            "type": "Microsoft.DataFactory/factories/linkedservices",
+            "apiVersion": "2018-06-01",
+            "name": "[concat(parameters('factoryName'), '/', variables('adlsLinkedServiceName'))]",
+            "properties": {
+                "description": "Azure Data Lake Storage Gen2 linked service for the IBRD loan data lake (Bronze/Silver/Gold layers).",
+                "type": "AzureBlobFS",
+                "typeProperties": {
+                    "url": "[concat('https://', parameters('adlsAccountName'), '.dfs.core.windows.net')]",
+                    "accountKey": {
+                        "type": "SecureString",
+                        "value": "[parameters('adlsAccountKey')]"
+                    }
+                },
+                "annotations": [
+                    "sink",
+                    "adls-gen2",
+                    "bronze-layer"
+                ]
+            }
+        },
+        {
+            "comments": "============================================================",
+            "comments2": "DATASET — SOURCE: HTTP (World Bank CSV via API)",
+            "comments3": "============================================================",
+            "type": "Microsoft.DataFactory/factories/datasets",
+            "apiVersion": "2018-06-01",
+            "name": "[concat(parameters('factoryName'), '/', variables('sourceDatasetName'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.DataFactory/factories/linkedservices', parameters('factoryName'), variables('httpLinkedServiceName'))]"
+            ],
+            "properties": {
+                "description": "Source dataset — IBRD loans CSV fetched via HTTP GET from World Bank SODA API.",
+                "type": "DelimitedText",
+                "linkedServiceName": {
+                    "referenceName": "[variables('httpLinkedServiceName')]",
+                    "type": "LinkedServiceReference"
+                },
+                "typeProperties": {
+                    "location": {
+                        "type": "HttpServerLocation",
+                        "relativeUrl": "/resource/zucq-nqt1.csv?$limit=500000&$order=:id"
+                    },
+                    "columnDelimiter": ",",
+                    "escapeChar": "\\",
+                    "quoteChar": "\"",
+                    "firstRowAsHeader": true,
+                    "encodingName": "UTF-8"
+                },
+                "schema": [],
+                "annotations": [
+                    "ibrd-loans",
+                    "http-source"
+                ]
+            }
+        },
+        {
+            "comments": "============================================================",
+            "comments2": "DATASET — SINK: ADLS Gen2 Bronze Layer (CSV)",
+            "comments3": "============================================================",
+            "type": "Microsoft.DataFactory/factories/datasets",
+            "apiVersion": "2018-06-01",
+            "name": "[concat(parameters('factoryName'), '/', variables('sinkDatasetName'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.DataFactory/factories/linkedservices', parameters('factoryName'), variables('adlsLinkedServiceName'))]"
+            ],
+            "properties": {
+                "description": "Sink dataset — Raw IBRD loans CSV in the ADLS Gen2 Bronze layer directory.",
+                "type": "DelimitedText",
+                "linkedServiceName": {
+                    "referenceName": "[variables('adlsLinkedServiceName')]",
+                    "type": "LinkedServiceReference"
+                },
+                "typeProperties": {
+                    "location": {
+                        "type": "AzureBlobFSLocation",
+                        "fileSystem": "[parameters('adlsFileSystem')]",
+                        "folderPath": "[variables('bronzeDirectory')]",
+                        "fileName": {
+                            "value": "@concat('ibrd_loans_raw_', formatDateTime(utcNow(), 'yyyyMMdd_HHmmss'), '.csv')",
+                            "type": "Expression"
+                        }
+                    },
+                    "columnDelimiter": ",",
+                    "escapeChar": "\\",
+                    "quoteChar": "\"",
+                    "firstRowAsHeader": true,
+                    "encodingName": "UTF-8"
+                },
+                "schema": [],
+                "annotations": [
+                    "ibrd-loans",
+                    "bronze-layer",
+                    "raw"
+                ]
+            }
+        },
+        {
+            "comments": "============================================================",
+            "comments2": "PIPELINE: Ingest IBRD API → ADLS Bronze (Copy Data)",
+            "comments3": "============================================================",
+            "type": "Microsoft.DataFactory/factories/pipelines",
+            "apiVersion": "2018-06-01",
+            "name": "[concat(parameters('factoryName'), '/', variables('pipelineName'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.DataFactory/factories/datasets', parameters('factoryName'), variables('sourceDatasetName'))]",
+                "[resourceId('Microsoft.DataFactory/factories/datasets', parameters('factoryName'), variables('sinkDatasetName'))]"
+            ],
+            "properties": {
+                "description": "Pipeline that copies IBRD Statement of Loans data from the World Bank HTTP API into the ADLS Gen2 Bronze layer as a time-stamped CSV file.",
+                "activities": [
+                    {
+                        "name": "CopyIBRDLoansAPIToBronze",
+                        "description": "Copy Data activity: Fetches IBRD loans CSV from World Bank API and lands it into ADLS Gen2 Bronze directory.",
+                        "type": "Copy",
+                        "dependsOn": [],
+                        "policy": {
+                            "timeout": "01:00:00",
+                            "retry": 3,
+                            "retryIntervalInSeconds": 60,
+                            "secureOutput": false,
+                            "secureInput": false
+                        },
+                        "typeProperties": {
+                            "source": {
+                                "type": "DelimitedTextSource",
+                                "storeSettings": {
+                                    "type": "HttpReadSettings",
+                                    "requestMethod": "GET",
+                                    "requestTimeout": "00:05:00"
+                                },
+                                "formatSettings": {
+                                    "type": "DelimitedTextReadSettings"
+                                }
+                            },
+                            "sink": {
+                                "type": "DelimitedTextSink",
+                                "storeSettings": {
+                                    "type": "AzureBlobFSWriteSettings",
+                                    "copyBehavior": "PreserveHierarchy"
+                                },
+                                "formatSettings": {
+                                    "type": "DelimitedTextWriteSettings",
+                                    "fileExtension": ".csv",
+                                    "quoteAllText": true
+                                }
+                            },
+                            "enableStaging": false,
+                            "enableSkipIncompatibleRow": true,
+                            "logSettings": {
+                                "enableCopyActivityLog": true,
+                                "copyActivityLogSettings": {
+                                    "logLevel": "Warning",
+                                    "enableReliableLogging": true
+                                },
+                                "logLocationSettings": {
+                                    "linkedServiceName": {
+                                        "referenceName": "[variables('adlsLinkedServiceName')]",
+                                        "type": "LinkedServiceReference"
+                                    },
+                                    "path": "[concat(parameters('adlsFileSystem'), '/pipeline_logs/copy_activity')]"
+                                }
+                            },
+                            "dataIntegrationUnits": 4,
+                            "translator": {
+                                "type": "TabularTranslator",
+                                "typeConversion": true,
+                                "typeConversionSettings": {
+                                    "allowDataTruncation": false,
+                                    "treatBooleanAsNumber": false
+                                }
+                            }
+                        },
+                        "inputs": [
+                            {
+                                "referenceName": "[variables('sourceDatasetName')]",
+                                "type": "DatasetReference"
+                            }
+                        ],
+                        "outputs": [
+                            {
+                                "referenceName": "[variables('sinkDatasetName')]",
+                                "type": "DatasetReference"
+                            }
+                        ]
+                    },
+                    {
+                        "name": "LogCopySuccess",
+                        "description": "Logs metadata about the successful copy operation for audit trail.",
+                        "type": "SetVariable",
+                        "dependsOn": [
+                            {
+                                "activity": "CopyIBRDLoansAPIToBronze",
+                                "dependencyConditions": [
+                                    "Succeeded"
+                                ]
+                            }
+                        ],
+                        "typeProperties": {
+                            "variableName": "copyStatus",
+                            "value": {
+                                "value": "@concat('SUCCESS | Rows: ', string(activity('CopyIBRDLoansAPIToBronze').output.rowsCopied), ' | Duration: ', string(activity('CopyIBRDLoansAPIToBronze').output.copyDuration), 's | Size: ', string(activity('CopyIBRDLoansAPIToBronze').output.dataWritten), ' bytes')",
+                                "type": "Expression"
+                            }
+                        }
+                    },
+                    {
+                        "name": "HandleCopyFailure",
+                        "description": "Handles failure of the Copy Data activity by logging error details.",
+                        "type": "SetVariable",
+                        "dependsOn": [
+                            {
+                                "activity": "CopyIBRDLoansAPIToBronze",
+                                "dependencyConditions": [
+                                    "Failed"
+                                ]
+                            }
+                        ],
+                        "typeProperties": {
+                            "variableName": "copyStatus",
+                            "value": {
+                                "value": "@concat('FAILED | Error: ', string(activity('CopyIBRDLoansAPIToBronze').output.errors[0].Message))",
+                                "type": "Expression"
+                            }
+                        }
+                    }
+                ],
+                "variables": {
+                    "copyStatus": {
+                        "type": "String",
+                        "defaultValue": "NOT_STARTED"
+                    }
+                },
+                "annotations": [
+                    "ibrd-ingestion",
+                    "api-to-bronze",
+                    "batch"
+                ],
+                "folder": {
+                    "name": "IBRD_Loan_Pipeline/Ingestion"
+                }
+            }
+        }
+    ],
+    "outputs": {
+        "pipelineResourceId": {
+            "type": "string",
+            "value": "[resourceId('Microsoft.DataFactory/factories/pipelines', parameters('factoryName'), variables('pipelineName'))]"
+        },
+        "adlsLinkedServiceId": {
+            "type": "string",
+            "value": "[resourceId('Microsoft.DataFactory/factories/linkedservices', parameters('factoryName'), variables('adlsLinkedServiceName'))]"
+        }
+    }
+}

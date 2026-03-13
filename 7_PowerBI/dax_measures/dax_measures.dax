@@ -1,0 +1,275 @@
+-- ============================================================================
+-- IBRD Loan Pipeline — PowerBI DAX Measures & Calculated Columns
+-- ============================================================================
+-- File    : dax_measures.dax
+-- Purpose : Production DAX measures for the IBRD Loan Analytics PowerBI
+--           dashboard. These connect to the Snowflake Gold layer Star Schema.
+-- Author  : Data Engineering Team
+-- Created : 2026-03-13
+-- ============================================================================
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- KEY PERFORMANCE INDICATORS (KPI Measures)
+-- ══════════════════════════════════════════════════════════════════════════════
+
+-- Total Original Principal Amount (USD)
+-- The sum of all original loan commitments across the IBRD portfolio.
+Total Loan Amount = 
+    FORMAT(
+        DIVIDE(
+            SUM(fact_loans[original_principal_amount]),
+            1000000000,
+            0
+        ),
+        "$#,##0.00B"
+    )
+
+-- Total Cancelled Amount (USD)
+-- Aggregate cancellation value — key metric for risk analysis.
+Total Cancelled Amount = 
+    FORMAT(
+        DIVIDE(
+            SUM(fact_loans[cancelled_amount]),
+            1000000000,
+            0
+        ),
+        "$#,##0.00B"
+    )
+
+-- Overall Cancellation Rate (%)
+-- Portfolio-wide ratio of cancelled to original principal amount.
+-- Critical KPI for identifying systemic cancellation trends.
+Cancellation Rate = 
+    VAR _totalPrincipal = SUM(fact_loans[original_principal_amount])
+    VAR _totalCancelled = SUM(fact_loans[cancelled_amount])
+    RETURN
+        IF(
+            _totalPrincipal > 0,
+            FORMAT(
+                DIVIDE(_totalCancelled, _totalPrincipal, 0),
+                "0.00%"
+            ),
+            "N/A"
+        )
+
+-- Total Disbursed Amount (USD)
+Total Disbursed Amount = 
+    FORMAT(
+        DIVIDE(
+            SUM(fact_loans[disbursed_amount]),
+            1000000000,
+            0
+        ),
+        "$#,##0.00B"
+    )
+
+-- Total Amount Repaid to IBRD (USD)
+Total Repaid to IBRD = 
+    FORMAT(
+        DIVIDE(
+            SUM(fact_loans[repaid_to_ibrd]),
+            1000000000,
+            0
+        ),
+        "$#,##0.00B"
+    )
+
+-- Outstanding Due to IBRD (USD)
+Total Due to IBRD = 
+    FORMAT(
+        DIVIDE(
+            SUM(fact_loans[due_to_ibrd]),
+            1000000,
+            0
+        ),
+        "$#,##0.00M"
+    )
+
+-- Active Loan Count
+-- Number of distinct loans currently in the portfolio.
+Active Loan Count = 
+    DISTINCTCOUNT(fact_loans[loan_number])
+
+-- Country Count
+-- Number of borrowing countries in the filtered context.
+Country Count = 
+    DISTINCTCOUNT(dim_country[country_code])
+
+-- Project Count
+Project Count = 
+    DISTINCTCOUNT(dim_project[project_id])
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- CANCELLATION ANALYSIS MEASURES
+-- ══════════════════════════════════════════════════════════════════════════════
+
+-- Average Cancellation per Loan (USD)
+-- Helps identify whether cancellations are concentrated or distributed.
+Avg Cancellation per Loan = 
+    VAR _avgCancel = AVERAGE(fact_loans[cancelled_amount])
+    RETURN
+        IF(
+            NOT ISBLANK(_avgCancel),
+            FORMAT(_avgCancel, "$#,##0"),
+            "$0"
+        )
+
+-- High-Risk Cancellation Count
+-- Loans where cancelled amount exceeds $1,000,000.
+High Risk Cancellation Count = 
+    CALCULATE(
+        DISTINCTCOUNT(fact_loans[loan_number]),
+        fact_loans[cancelled_amount] > 1000000
+    )
+
+-- Cancellation Rate by Region
+-- Used in matrix visuals to compare regional cancellation patterns.
+Regional Cancellation Rate = 
+    VAR _regionPrincipal = SUM(fact_loans[original_principal_amount])
+    VAR _regionCancelled = SUM(fact_loans[cancelled_amount])
+    RETURN
+        DIVIDE(_regionCancelled, _regionPrincipal, 0)
+
+-- YoY Cancellation Change (%)
+-- Compares current year cancellations to previous year.
+YoY Cancellation Change = 
+    VAR _currentYear = SUM(fact_loans[cancelled_amount])
+    VAR _previousYear = 
+        CALCULATE(
+            SUM(fact_loans[cancelled_amount]),
+            DATEADD(fact_loans[board_approval_date], -1, YEAR)
+        )
+    RETURN
+        IF(
+            _previousYear > 0,
+            FORMAT(
+                DIVIDE(_currentYear - _previousYear, _previousYear, 0),
+                "+0.0%;-0.0%;0.0%"
+            ),
+            "N/A"
+        )
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- LOAN LIFECYCLE MEASURES
+-- ══════════════════════════════════════════════════════════════════════════════
+
+-- Average Loan Processing Time (Days)
+-- Days from board approval to agreement signing.
+Avg Processing Days = 
+    AVERAGEX(
+        fact_loans,
+        DATEDIFF(
+            fact_loans[board_approval_date],
+            fact_loans[agreement_signing_date],
+            DAY
+        )
+    )
+
+-- Average Disbursement Period (Days)
+-- Days from effective date to last disbursement.
+Avg Disbursement Period = 
+    AVERAGEX(
+        FILTER(
+            fact_loans,
+            NOT ISBLANK(fact_loans[effective_date_most_recent])
+            && NOT ISBLANK(fact_loans[last_disbursement_date])
+        ),
+        DATEDIFF(
+            fact_loans[effective_date_most_recent],
+            fact_loans[last_disbursement_date],
+            DAY
+        )
+    )
+
+-- Average Repayment Duration (Years)
+-- Duration from first to last repayment.
+Avg Repayment Years = 
+    AVERAGEX(
+        FILTER(
+            fact_loans,
+            NOT ISBLANK(fact_loans[first_repayment_date])
+            && NOT ISBLANK(fact_loans[last_repayment_date])
+        ),
+        DATEDIFF(
+            fact_loans[first_repayment_date],
+            fact_loans[last_repayment_date],
+            YEAR
+        )
+    )
+
+-- Disbursement Efficiency (%)
+-- Ratio of disbursed to original principal — measures utilization.
+Disbursement Efficiency = 
+    VAR _principal = SUM(fact_loans[original_principal_amount])
+    VAR _disbursed = SUM(fact_loans[disbursed_amount])
+    RETURN
+        IF(
+            _principal > 0,
+            FORMAT(DIVIDE(_disbursed, _principal, 0), "0.0%"),
+            "N/A"
+        )
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- INTEREST RATE ANALYSIS
+-- ══════════════════════════════════════════════════════════════════════════════
+
+-- Average Interest Rate
+Avg Interest Rate = 
+    FORMAT(AVERAGE(fact_loans[interest_rate]), "0.00%")
+
+-- Weighted Average Interest Rate
+-- Weighted by original principal amount for accurate portfolio-level rate.
+Weighted Avg Interest Rate = 
+    VAR _weightedSum = 
+        SUMX(
+            fact_loans,
+            fact_loans[interest_rate] * fact_loans[original_principal_amount]
+        )
+    VAR _totalPrincipal = SUM(fact_loans[original_principal_amount])
+    RETURN
+        IF(
+            _totalPrincipal > 0,
+            FORMAT(DIVIDE(_weightedSum, _totalPrincipal, 0), "0.00%"),
+            "N/A"
+        )
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- TOP-N / RANKING MEASURES
+-- ══════════════════════════════════════════════════════════════════════════════
+
+-- Top 3 Borrowing Countries (by total principal)
+-- Returns a comma-separated string for card visuals.
+Top 3 Countries = 
+    VAR _ranked = 
+        TOPN(
+            3,
+            SUMMARIZE(
+                fact_loans,
+                dim_country[country],
+                "TotalPrincipal", SUM(fact_loans[original_principal_amount])
+            ),
+            [TotalPrincipal],
+            DESC
+        )
+    RETURN
+        CONCATENATEX(
+            _ranked,
+            dim_country[country],
+            ", ",
+            [TotalPrincipal],
+            DESC
+        )
+
+-- Rank by Cancellation Amount (for conditional formatting)
+Cancellation Rank = 
+    RANKX(
+        ALL(dim_country[country]),
+        SUM(fact_loans[cancelled_amount]),
+        ,
+        DESC,
+        Dense
+    )

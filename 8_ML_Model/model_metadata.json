@@ -1,0 +1,81 @@
+{
+    "model_name": "IBRD Loan Cancellation Predictor",
+    "version": "1.0.0",
+    "created": "2026-03-13",
+    "author": "Data Engineering Team",
+    "framework": "PySpark MLlib 3.x",
+
+    "problem_type": "Binary Classification",
+    "target_variable": "is_high_cancellation",
+    "target_definition": "1 if cancelled_amount > 10% of original_principal_amount, else 0",
+    "cancellation_threshold": 0.10,
+
+    "data_source": {
+        "location": "Gold layer Star Schema (fact_loans + dimensions)",
+        "format": "Parquet (Snappy)",
+        "join_strategy": "Broadcast joins on dimension tables"
+    },
+
+    "features": {
+        "numeric": [
+            {"name": "log_principal", "description": "Log-transformed original principal amount (reduces skewness)"},
+            {"name": "interest_rate", "description": "Annual interest rate (%)"},
+            {"name": "service_charge_rate", "description": "Service charge rate (%)"},
+            {"name": "disbursement_ratio", "description": "Disbursed / Original principal"},
+            {"name": "repayment_ratio", "description": "Repaid / Original principal"},
+            {"name": "processing_days", "description": "Days from board approval to agreement signing"},
+            {"name": "loan_age_days", "description": "Days from board approval to today"},
+            {"name": "has_third_party", "description": "Binary: 1 if sold to 3rd party, else 0"}
+        ],
+        "categorical": [
+            {"name": "region", "encoding": "StringIndexer → OneHotEncoder"},
+            {"name": "loan_type", "encoding": "StringIndexer → OneHotEncoder"},
+            {"name": "loan_status", "encoding": "StringIndexer → OneHotEncoder"}
+        ],
+        "preprocessing": {
+            "imputation": "Median (via PySpark Imputer)",
+            "scaling": "StandardScaler (withStd=True, withMean=False)",
+            "null_handling": "fillna with domain defaults before pipeline"
+        }
+    },
+
+    "model": {
+        "algorithm": "RandomForestClassifier",
+        "hyperparameters": {
+            "numTrees": "[50, 100, 200]  (grid search)",
+            "maxDepth": "[5, 10, 15]  (grid search)",
+            "minInstancesPerNode": 5,
+            "featureSubsetStrategy": "sqrt"
+        },
+        "validation": {
+            "method": "3-fold Cross-Validation",
+            "metric": "AUC-ROC",
+            "parallelism": 4
+        },
+        "train_test_split": "80/20 (seed=42)"
+    },
+
+    "evaluation_metrics": [
+        "AUC-ROC",
+        "AUC-PR (Precision-Recall)",
+        "Accuracy",
+        "F1-Score",
+        "Weighted Precision",
+        "Weighted Recall",
+        "Confusion Matrix",
+        "Feature Importances (Top 10)"
+    ],
+
+    "deployment": {
+        "model_format": "PySpark MLlib PipelineModel (saved via .write())",
+        "output_path": "8_ML_Model/trained_model/",
+        "serving": "Batch prediction via spark-submit or Databricks Job",
+        "monitoring": "Track prediction drift via scheduled re-evaluation"
+    },
+
+    "usage": {
+        "train": "spark-submit 8_ML_Model/cancellation_predictor.py",
+        "train_local": "spark-submit 8_ML_Model/cancellation_predictor.py --local",
+        "predict": "Load saved model → model.transform(new_data)"
+    }
+}
